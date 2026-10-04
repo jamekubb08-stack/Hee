@@ -1,0 +1,262 @@
+-- ============================================
+-- 1. โหลด UI Library (Rayfield)
+-- ============================================
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "Delta Script Hub | Combat & Movement",
+   LoadingTitle = "กำลังโหลดระบบ...",
+   LoadingSubtitle = "by Assistant",
+   ConfigurationSaving = { Enabled = false }
+})
+
+-- ============================================
+-- 2. ตัวแปรและบริการหลัก (Services & Variables)
+-- ============================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ตั้งค่าเริ่มต้น
+local Config = {
+    AimbotEnabled = false,
+    AimPart = "Head", -- "Head" หรือ "HumanoidRootPart" (Body)
+    FOVSize = 100,
+    FOVVisible = true,
+    
+    ESPEnabled = false,
+    ESPName = false,
+    
+    FlyEnabled = false,
+    FlySpeed = 50,
+    JumpPower = 50
+}
+
+-- วงกลม FOV
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Color = Color3.fromRGB(255, 50, 50)
+FOVCircle.Thickness = 1.5
+FOVCircle.NumSides = 60
+FOVCircle.Filled = false
+FOVCircle.Visible = false
+
+-- ============================================
+-- 3. ระบบ Aimbot & FOV Logic
+-- ============================================
+local function getClosestPlayer()
+    local closestPlayer = nil
+    local shortestDistance = Config.FOVSize
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild(Config.AimPart) and player.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
+            local targetPart = player.Character[Config.AimPart]
+            local screenPosition, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+
+            if onScreen then
+                local mousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                local distance = (Vector2.new(screenPosition.X, screenPosition.Y) - mousePos).Magnitude
+
+                if distance < shortestDistance then
+                    closestPlayer = targetPart
+                    shortestDistance = distance
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+-- Render Loop สำหรับ Aimbot และ FOV Circle
+RunService.RenderStepped:Connect(function()
+    -- อัปเดต FOV Circle
+    FOVCircle.Radius = Config.FOVSize
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Visible = Config.FOVVisible and Config.AimbotEnabled
+
+    -- ทำงาน Aimbot
+    if Config.AimbotEnabled then
+        local target = getClosestPlayer()
+        if target then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+        end
+    end
+end)
+
+-- ============================================
+-- 4. ระบบ ESP (Box + Name)
+-- ============================================
+local espHolders = {}
+
+local function createESP(player)
+    if player == LocalPlayer then return end
+    
+    local function updateESP()
+        local character = player.Character
+        if not character then return end
+        
+        -- ใช้ Highlight สำหรับสร้าง ESP Box เรียบง่าย
+        local highlight = character:FindFirstChild("ESPHighlight") or Instance.new("Highlight")
+        highlight.Name = "ESPHighlight"
+        highlight.Parent = character
+        highlight.FillTransparency = 0.5
+        highlight.OutlineTransparency = 0
+        highlight.FillColor = Color3.fromRGB(255, 0, 0)
+        highlight.Enabled = Config.ESPEnabled
+
+        -- ESP Name
+        local head = character:FindFirstChild("Head")
+        if head then
+            local billboard = head:FindFirstChild("ESPName") or Instance.new("BillboardGui")
+            billboard.Name = "ESPName"
+            billboard.Parent = head
+            billboard.AlwaysOnTop = true
+            billboard.Size = UDim2.new(0, 100, 0, 30)
+            billboard.StudsOffset = Vector3.new(0, 2, 0)
+            billboard.Enabled = Config.ESPName and Config.ESPEnabled
+
+            local textLabel = billboard:FindFirstChildOfClass("TextLabel") or Instance.new("TextLabel")
+            textLabel.Parent = billboard
+            textLabel.Size = UDim2.new(1, 0, 1, 0)
+            textLabel.BackgroundTransparency = 1
+            textLabel.Text = player.Name
+            textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            textLabel.TextScaled = true
+        end
+    end
+
+    player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        updateESP()
+    end)
+    updateESP()
+end
+
+-- เพิ่ม ESP ให้ผู้เล่นทุกคน
+for _, p in pairs(Players:GetPlayers()) do createESP(p) end
+Players.PlayerAdded:Connect(createESP)
+
+-- ============================================
+-- 5. ระบบ Fly & Movement
+-- ============================================
+local bodyVelocity, bodyGyro
+
+local function startFly()
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    
+    local hrp = char.HumanoidRootPart
+    bodyVelocity = Instance.new("BodyVelocity", hrp)
+    bodyVelocity.MaxForce = Vector3.new(4e5, 4e5, 4e5)
+    bodyVelocity.Velocity = Vector3.zero
+    
+    bodyGyro = Instance.new("BodyGyro", hrp)
+    bodyGyro.MaxTorque = Vector3.new(4e5, 4e5, 4e5)
+    bodyGyro.CFrame = hrp.CFrame
+
+    task.spawn(function()
+        while Config.FlyEnabled and char and hrp do
+            bodyGyro.CFrame = Camera.CFrame
+            bodyVelocity.Velocity = Camera.CFrame.LookVector * Config.FlySpeed
+            task.wait()
+        end
+        if bodyVelocity then bodyVelocity:Destroy() end
+        if bodyGyro then bodyGyro:Destroy() end
+    end)
+end
+
+-- ============================================
+-- 6. สร้างแท็บเมนู UI
+-- ============================================
+
+-- Tab 1: Combat (Aimbot & FOV)
+local CombatTab = Window:CreateTab("Combat", 4483362458)
+
+CombatTab:CreateToggle({
+   Name = "เปิดใช้งาน Aimbot",
+   CurrentValue = false,
+   Callback = function(Value) Config.AimbotEnabled = Value end,
+})
+
+CombatTab:CreateDropdown({
+   Name = "ตำแหน่งที่ล็อก (Lock Part)",
+   Options = {"Head", "Body"},
+   CurrentOption = {"Head"},
+   Callback = function(Option)
+      if Option[1] == "Head" then
+          Config.AimPart = "Head"
+      else
+          Config.AimPart = "HumanoidRootPart" -- Body
+      end
+   end,
+})
+
+CombatTab:CreateSlider({
+   Name = "ปรับขนาด FOV (1-500)",
+   Range = {1, 500},
+   Increment = 1,
+   CurrentValue = 100,
+   Callback = function(Value) Config.FOVSize = Value end,
+})
+
+CombatTab:CreateToggle({
+   Name = "แสดงวงกลม FOV",
+   CurrentValue = true,
+   Callback = function(Value) Config.FOVVisible = Value end,
+})
+
+-- Tab 2: Visuals (ESP)
+local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+
+VisualsTab:CreateToggle({
+   Name = "เปิดใช้งาน ESP Box",
+   CurrentValue = false,
+   Callback = function(Value) 
+       Config.ESPEnabled = Value
+       for _, p in pairs(Players:GetPlayers()) do createESP(p) end
+   end,
+})
+
+VisualsTab:CreateToggle({
+   Name = "แสดงชื่อผู้เล่น (ESP Name)",
+   CurrentValue = false,
+   Callback = function(Value) 
+       Config.ESPName = Value
+       for _, p in pairs(Players:GetPlayers()) do createESP(p) end
+   end,
+})
+
+-- Tab 3: Movement (Fly & Jump)
+local MovementTab = Window:CreateTab("Movement", 4483362458)
+
+MovementTab:CreateToggle({
+   Name = "บิน (Fly)",
+   CurrentValue = false,
+   Callback = function(Value)
+       Config.FlyEnabled = Value
+       if Value then startFly() end
+   end,
+})
+
+MovementTab:CreateSlider({
+   Name = "ความเร็วบิน (Fly Speed)",
+   Range = {10, 200},
+   Increment = 5,
+   CurrentValue = 50,
+   Callback = function(Value) Config.FlySpeed = Value end,
+})
+
+MovementTab:CreateSlider({
+   Name = "กระโดดสูง (Jump Power)",
+   Range = {50, 300},
+   Increment = 5,
+   CurrentValue = 50,
+   Callback = function(Value)
+       Config.JumpPower = Value
+       if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+           LocalPlayer.Character.Humanoid.JumpPower = Value
+           LocalPlayer.Character.Humanoid.UseJumpPower = true
+       end
+   end,
+})
